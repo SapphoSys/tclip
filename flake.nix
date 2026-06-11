@@ -19,6 +19,24 @@
     ] (system: let
       version = builtins.substring 0 8 self.lastModifiedDate;
       pkgs = import nixpkgs {inherit system;};
+      nixosModuleCheck =
+        nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [
+            self.nixosModules.tclip
+            {
+              services.tclip = {
+                enable = true;
+                package = self.packages.${system}.tclipd;
+                authKeyFile = "/run/secrets/tclip-authkey";
+                hostname = "paste";
+                httpPort = 8080;
+                disableHttps = true;
+                enableLineNumbers = true;
+              };
+            }
+          ];
+        };
     in {
       packages = rec {
         tclipd = pkgs.buildGo126Module {
@@ -28,6 +46,7 @@
           src = ./.;
           subPackages = "cmd/tclipd";
           vendorHash = "sha256-Hs73RJHMcnrjq19l8bmRvs9urxGqOG582xch+IhLtss=";
+          meta.mainProgram = "tclipd";
         };
 
         tclip = pkgs.buildGo126Module {
@@ -36,6 +55,7 @@
           subPackages = "cmd/tclip";
           inherit (pkgs) go;
           env.CGO_ENABLED = "0";
+          meta.mainProgram = "tclip";
         };
 
         portable-service = let
@@ -64,6 +84,16 @@
       apps.default =
         utils.lib.mkApp {drv = self.packages.${system}.default;};
 
+      checks =
+        pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          nixos-module =
+            pkgs.runCommand "tclip-nixos-module-check" {
+              execStart = nixosModuleCheck.config.systemd.services.tclip.serviceConfig.ExecStart;
+            } ''
+              touch $out
+            '';
+        };
+
       devShells.default = pkgs.mkShell {
         buildInputs = with pkgs; [
           go_1_26
@@ -90,5 +120,10 @@
         TSNET_HOSTNAME = "paste-devel";
       };
     })
-    // {};
+    // {
+      nixosModules = rec {
+        tclip = import ./nixos/modules/services/tclip.nix {inherit self;};
+        default = tclip;
+      };
+    };
 }
